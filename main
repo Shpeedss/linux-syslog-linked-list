@@ -1,0 +1,108 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/*
+ * SyslogNode: Her bir log kaydini bellekte tutacak olan cift yonlu bagli liste dugumu.
+ * Icerisinde logun temel bilesenleri ve baglanti isaretcileri bulunur.
+ */
+typedef struct SyslogNode {
+    char timestamp[32];      // Logun uretildigi tarih ve zaman (Oca 25 14:22:10)
+    char hostname[64];       // Cihazin veya sunucunun adi
+    char processName[64];    // Logu ureten servis veya uygulama
+    char message[256];       // Logun icerdigi asil mesaj/hata tespiti
+    
+    struct SyslogNode* prev; // Geriye dogru (yeni logdan eskiye) okuma yapmak icin isaretci
+    struct SyslogNode* next; // Ileriye dogru (eski logdan yeniye) okuma yapmak icin isaretci
+} SyslogNode;
+
+// Listenin basini (en eski log) ve sonunu (en yeni log) tutan global isaretciler
+SyslogNode* head = NULL;
+SyslogNode* tail = NULL;
+
+/*
+ * createNode: Yeni bir log verisi geldiginde heap uzerinde dinamik bellek ayirir.
+ */
+SyslogNode* createNode(const char* time, const char* host, const char* process, const char* msg) {
+    SyslogNode* newNode = (SyslogNode*)malloc(sizeof(SyslogNode));
+    if (newNode == NULL) {
+        printf("Kritik Hata: Bellek tahsisi basarisiz!\n");
+        return NULL;
+    }
+    
+    // Veriler yeni dugume kopyalaniyor
+    strncpy(newNode->timestamp, time, 31);
+    strncpy(newNode->hostname, host, 63);
+    strncpy(newNode->processName, process, 63);
+    strncpy(newNode->message, msg, 255);
+    
+    newNode->prev = NULL;
+    newNode->next = NULL;
+    
+    return newNode;
+}
+
+/*
+ * appendLog: Gelen log verisini cift yonlu bagli listenin sonuna ekler.
+ * Zira loglar kronolojik olarak akmaktadir ve her yeni log sona eklenmelidir.
+ */
+void appendLog(const char* time, const char* host, const char* process, const char* msg) {
+    SyslogNode* newNode = createNode(time, host, process, msg);
+    
+    if (head == NULL) {
+        // Eger liste bossa, ilk dugum hem head hem de tail olur.
+        head = newNode;
+        tail = newNode;
+    } else {
+        // Liste bos degilse, mevcut kuyrugun sonuna ekleme yapilir.
+        tail->next = newNode;
+        newNode->prev = tail;
+        tail = newNode; // Kuyruk isaretcisi yeni dugumu gosterecek sekilde guncellenir.
+    }
+}
+
+/*
+ * printLogsReverse: Loglari en yeni tarihliden en eskiye dogru ekrana yazdirir.
+ * Cift yonlu bagli liste secilmesinin temel sebebi olan bu fonksiyon, tail'den head'e ilerler.
+ */
+void printLogsReverse() {
+    SyslogNode* current = tail;
+    printf("\n--- SYSLOG KAYITLARI (Yeniden Eskiye Dogru) ---\n");
+    while (current != NULL) {
+        printf("[%s] %s %s: %s\n", current->timestamp, current->hostname, current->processName, current->message);
+        current = current->prev; // Bir onceki loga git
+    }
+    printf("--------------------------------------------------\n");
+}
+
+/*
+ * freeList: Program sonlanirken dinamik tahsis edilen bellegi sisteme iade eder (Memory leak onlemi).
+ */
+void freeList() {
+    SyslogNode* current = head;
+    SyslogNode* nextNode;
+    
+    while (current != NULL) {
+        nextNode = current->next;
+        free(current);
+        current = nextNode;
+    }
+}
+
+int main() {
+    // Demo amaciyla sisteme örnek Syslog kayitlari ekleniyor.
+    // Gercek senaryoda bu veriler /var/log/syslog dosyasindan satir satir okunabilir.
+    
+    appendLog("Oct 24 08:15:22", "ubuntu-server", "sshd[1024]", "Accepted publickey for root");
+    appendLog("Oct 24 09:30:10", "ubuntu-server", "kernel", "usb 1-1: new high-speed USB device");
+    appendLog("Oct 24 14:05:00", "ubuntu-server", "systemd", "Starting Cleanup of Temporary Directories...");
+    appendLog("Oct 24 14:45:12", "ubuntu-server", "nginx[2048]", "Kritik: Port 80 is already in use");
+
+    // Kodun calistigini gostermek icin loglari ters siralama ile (troubleshooting senaryosu) yazdiriyoruz.
+    printLogsReverse();
+
+    // RAM temizligi
+    freeList();
+    
+    return 0;
+}
